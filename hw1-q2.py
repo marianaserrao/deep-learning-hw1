@@ -8,6 +8,7 @@ import torch
 from torch.utils.data import DataLoader
 import torch.nn as nn
 from matplotlib import pyplot as plt
+from tqdm import tqdm
 
 import utils
 
@@ -20,32 +21,17 @@ class LogisticRegression(nn.Module):
         n_classes (int)
         n_features (int)
 
-        The __init__ should be used to declare what kind of layers and other
-        parameters the module has. For example, a logistic regression module
-        has a weight matrix and bias vector. For an idea of how to use
-        pytorch to make weights and biases, have a look at
-        https://pytorch.org/docs/stable/nn.html
         """
-        super().__init__()
-        # In a pytorch module, the declarations of layers needs to come after
-        # the super __init__ line, otherwise the magic doesn't work.
+        super(LogisticRegression,self).__init__()
+        self.layer = torch.nn.Linear(n_features,n_classes)
 
     def forward(self, x, **kwargs):
         """
         x (batch_size x n_features): a batch of training examples
 
-        Every subclass of nn.Module needs to have a forward() method. forward()
-        describes how the module computes the forward pass. In a log-lineear
-        model like this, for example, forward() needs to compute the logits
-        y = Wx + b, and return y (you don't need to worry about taking the
-        softmax of y because nn.CrossEntropyLoss does that for you).
-
-        One nice thing about pytorch is that you only need to define the
-        forward pass -- this is enough for it to figure out how to do the
-        backward pass.
         """
-        raise NotImplementedError
-
+        output = torch.sigmoid(self.layer(x))
+        return output
 
 # Q2.2
 class FeedforwardNetwork(nn.Module):
@@ -60,23 +46,42 @@ class FeedforwardNetwork(nn.Module):
         activation_type (str)
         dropout (float): dropout probability
 
-        As in logistic regression, the __init__ here defines a bunch of
-        attributes that each FeedforwardNetwork instance has. Note that nn
-        includes modules for several activation functions and dropout as well.
         """
-        super().__init__()
-        # Implement me!
+        super(FeedforwardNetwork, self).__init__()
+
+        activation_funtions = {
+            "relu": nn.ReLU,
+            "tahn": nn.Tanh
+        }
+
+        self.in_layer = nn.Linear(n_features, hidden_size)
+        self.out_drop_out = nn.Dropout(dropout)
+        self.out_activation = activation_funtions[activation_type]()
+        self.out_layer = nn.Linear(hidden_size, n_classes)
+
+        hidden_layers = {}
+        for i in range(layers-1):
+            hidden_layers[f'drop_out_{i+1}']=nn.Dropout(dropout)
+            hidden_layers[f'activation_{i+1}']=activation_funtions[activation_type]()
+            hidden_layers[f'h_layer_{i+1}']=nn.Linear(hidden_size, hidden_size)
+        self.hidden_layers = hidden_layers  
+        self.layers = layers        
 
     def forward(self, x, **kwargs):
         """
         x (batch_size x n_features): a batch of training examples
 
-        This method needs to perform all the computation needed to compute
-        the output logits from x. This will include using various hidden
-        layers, pointwise nonlinear functions, and dropout.
         """
-        raise NotImplementedError
-
+        hl = self.hidden_layers  
+        output = self.in_layer(x)
+        for i in range(self.layers-1):
+            output = hl[f'drop_out_{i+1}'](output)
+            output = hl[f'activation_{i+1}'](output)
+            output = hl[f'h_layer_{i+1}'](output)
+        output= self.out_drop_out(output)
+        output= self.out_activation(output)        
+        output= self.out_layer(output)
+        return output
 
 def train_batch(X, y, model, optimizer, criterion, **kwargs):
     """
@@ -86,18 +91,13 @@ def train_batch(X, y, model, optimizer, criterion, **kwargs):
     optimizer: optimizer used in gradient step
     criterion: loss function
 
-    To train a batch, the model needs to predict outputs for X, compute the
-    loss between these predictions and the "gold" labels y using the criterion,
-    and compute the gradient of the loss with respect to the model parameters.
-
-    Check out https://pytorch.org/docs/stable/optim.html for examples of how
-    to use an optimizer object to update the parameters.
-
-    This function should return the loss (tip: call loss.item()) to get the
-    loss as a numerical value that is not part of the computation graph.
     """
-    raise NotImplementedError
-
+    output=model(X)
+    optimizer.zero_grad()
+    loss=criterion(output,y)
+    loss.backward()
+    optimizer.step()
+    return loss
 
 def predict(model, X):
     """X (n_examples x n_features)"""
@@ -168,7 +168,7 @@ def main():
         model = FeedforwardNetwork(
             n_classes,
             n_feats,
-            opt.hidden_size,
+            opt.hidden_sizes,
             opt.layers,
             opt.activation,
             opt.dropout
@@ -193,7 +193,7 @@ def main():
     train_losses = []
     for ii in epochs:
         print('Training epoch {}'.format(ii))
-        for X_batch, y_batch in train_dataloader:
+        for X_batch, y_batch in tqdm(train_dataloader):
             loss = train_batch(
                 X_batch, y_batch, model, optimizer, criterion)
             train_losses.append(loss)
